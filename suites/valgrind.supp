@@ -1,0 +1,13 @@
+{
+   ignore-overlap
+   Memcheck:Overlap
+   fun:*
+   obj:*
+}
+{
+   reachable
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   obj:*.so*
+   fun:*
+}
