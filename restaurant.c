@@ -247,7 +247,6 @@ int freeDessert(TableOrder *order) {
     char applePie[MAX_ITEM_LEN] = "apple pie";
     Item *pie = NULL;
     ItemNode *curr = menu.head;
-
     //For each loop
     //Looking for the apple pie in the menu.
     while(curr != NULL) {
@@ -258,7 +257,6 @@ int freeDessert(TableOrder *order) {
         }
         curr = curr->next;
     }
-    
     if (pie == NULL) {
         if (addToMenu(applePie, 0, 0) == FAILURE) {
             return FAILURE;
@@ -275,12 +273,10 @@ int freeDessert(TableOrder *order) {
             return FAILURE;   
         }
     }
-
     ItemNode *newNode= malloc(sizeof(ItemNode));
     if (newNode == NULL) {
         return FAILURE;
     }
-
     newNode->item = pie;
     newNode->next = NULL;
     //Here i'm just appending the new node to the order head's list.
