@@ -27,7 +27,7 @@ int addToMenu(char name[MAX_ITEM_LEN], int cook_time, int cost) {
     if (name == NULL || cook_time < 0 || cost < 0 || name[0] == '\0') {
         return FAILURE;
     }
-    if (strlen(name) > MAX_ITEM_LEN) {
+    if (strlen(name) >= MAX_ITEM_LEN) {
         return FAILURE;
     }
     ItemNode *curr = menu.head;
@@ -84,7 +84,7 @@ int removeFromMenu(Item *item) {
     if (item == NULL){
         return FAILURE;
     }
-    if (item->cook_time < 0 || item->cost < 0 || item->name == NULL || item->name[0] == '\0') {
+    if (item->cook_time < 0 || item->cost < 0 || item->name[0] == '\0') {
         return FAILURE;
     }
     
@@ -93,7 +93,7 @@ int removeFromMenu(Item *item) {
     int found = 0;
 
     while(curr != NULL) {
-        if (strcmp(curr->item->name, item->name) == 0) {
+        if (curr->item == item && strcmp(curr->item->name, item->name) == 0) {
             if (prev == NULL) {
                 menu.head = curr->next;
             }
@@ -161,10 +161,7 @@ int addTableOrder(ItemNode *head, int table_num, int guests_at_table, int order_
  * @return total cost of all items in the order, or FAILURE if invalid input
  */
 int calculateTableCost(TableOrder order) {
-    if (order.head == NULL) { //Error checking
-        return FAILURE;
-    }
-
+    //Here we are just going to walk through the orders and just calculate the cost of the items for that order.
     ItemNode *curr = order.head;
     int cost = 0;
     while(curr != NULL){
@@ -182,10 +179,7 @@ int calculateTableCost(TableOrder order) {
  * @return number of out-of-date items in the order, or FAILURE if input is invalid
  */
 int orderOutOfDate(TableOrder order) {
-    if (order.head == NULL) { //Error checking
-        return FAILURE;
-    }
-
+    //Here we're going to walk through the orders array and check for the number of times that are out of date
     ItemNode *curr = order.head;
     int count = 0;
     while(curr != NULL){
@@ -198,6 +192,7 @@ int orderOutOfDate(TableOrder order) {
             }
             currTwo = currTwo->next;
         }
+        //If we can't find the two same items we say that the item is no longer on the menu and increment count.
         if (found == 0) {
             count++;
         }
@@ -213,10 +208,8 @@ int orderOutOfDate(TableOrder order) {
  * @return FAILURE on invalid input or any other error, else SUCCESS
  */
 int keepChefFromQuitting(void) {
-    if (menu.head == NULL) { //Error checking
-        return FAILURE;
-    }
     //Starting at the 1st node of menu.
+    //Going to walk through the menu list.
     ItemNode *curr = menu.head;
     while(curr != NULL) {
         ItemNode *next = curr->next;
@@ -229,6 +222,7 @@ int keepChefFromQuitting(void) {
     //Starting at the 1st node of menu.
     ItemNode *currTwo = menu.head;
     for (int i = 0; i < 5 && currTwo != NULL; i++) {
+        //Adding 2 dollars to each item's cost that needs more time.
         currTwo->item->cost += 2; 
         currTwo = currTwo->next;
     }
@@ -250,8 +244,8 @@ int freeDessert(TableOrder *order) {
         return FAILURE;
     }
     //Initing pointers
-    char *applePie = "apple pie";
-    ItemNode *pie = NULL;
+    char applePie[MAX_ITEM_LEN] = "apple pie";
+    Item *pie = NULL;
     ItemNode *curr = menu.head;
 
     //For each loop
@@ -264,18 +258,22 @@ int freeDessert(TableOrder *order) {
         }
         curr = curr->next;
     }
-    curr = menu.head;
     
-    while (curr != NULL) {
-        if (strcmp(curr->item->name, applePie) == 0) {
-            pie = curr->item;
-            break;
-        }
-            curr = curr->next;
-    }
-
     if (pie == NULL) {
-        return FAILURE;   //Shouldn't happen, but defensive
+        if (addToMenu(applePie, 0, 0) == FAILURE) {
+            return FAILURE;
+        }
+        curr = menu.head;
+        while (curr != NULL) {
+            if (strcmp(curr->item->name, applePie) == 0) {
+                pie = curr->item;
+                break;
+            }
+            curr = curr->next;
+        }
+        if (pie == NULL) {//pie shouldn't be null, but just in case.
+            return FAILURE;   
+        }
     }
 
     ItemNode *newNode= malloc(sizeof(ItemNode));
@@ -285,7 +283,7 @@ int freeDessert(TableOrder *order) {
 
     newNode->item = pie;
     newNode->next = NULL;
-    //Here just appending the new node to the order head's list.
+    //Here i'm just appending the new node to the order head's list.
     if (order->head == NULL) {
         order->head = newNode;
     } 
@@ -306,8 +304,18 @@ int freeDessert(TableOrder *order) {
  */
 TableOrder findOldestOrder(void) {
     // Note: Get rid of the below TableOrder when you select a different oldest TableOrder as this is just a placeholder.
-    TableOrder incomplete = {NULL, 0, 0, 0};
-    return incomplete;
+    if (num_table_orders == 0) {
+        TableOrder incomplete = {NULL, 0, 0, 0};
+        return incomplete;
+    }
+
+    TableOrder oldest = orders[0];
+    for (int i = 1; i < num_table_orders; i++) {
+        if (orders[i].order_time < oldest.order_time) {
+            oldest = orders[i];
+        }
+    }
+    return oldest;
 }
 
 /**
@@ -317,7 +325,100 @@ TableOrder findOldestOrder(void) {
  * @return head of new list, or FAILURE if fewer than 5 menu items or a malloc failure
  */
 ItemNode *rushHourSearch(void) {
-    //ItemNode newList = malloc(5);
+    ItemNode *curr = menu.head;
+    int count = 0;
+    while (curr != NULL) {
+        count++;
+        curr = curr->next;
+    }
+
+    if (count < 5) {
+        return NULL;
+    }
+
+    //This is to track the picked items and the new list state.
+    Item *picked[5];
+    int picked_count = 0;
+    ItemNode *newHead = NULL;
+    ItemNode *newTail = NULL;
+
+    // We need to find the best/shortest cook time for the unpicked item.
+    for (int i = 0; i < 5; i++) {
+        Item *best = NULL;
+        curr = menu.head;
+        while (curr != NULL) {
+            int alreadyPicked = 0;
+            for (int j = 0; j < picked_count; j++) {
+                if (picked[j] == curr->item) {
+                    alreadyPicked = 1;
+                    break;
+                }
+            }
+
+        if (!alreadyPicked) {
+                if (best == NULL || curr->item->cook_time < best->cook_time) {
+                    best = curr->item;
+                }
+            }
+            curr = curr->next;
+        }
+
+        ItemNode *node = malloc(sizeof(ItemNode));
+        if (node == NULL) {
+            //This is in case of a malloc failure.
+            ItemNode *c = newHead;
+            while (c != NULL) {
+                ItemNode *n = c->next;
+                free(c);
+                c = n;
+            }
+            return NULL;
+        }
+        node->item = best;
+        node->next = NULL;
+        
+        if (newHead == NULL) {
+            newHead = node;
+        } else {
+            newTail->next = node;
+        }
+        newTail = node;
+
+        //Here we need to record the picked item.
+        picked[picked_count] = best;
+        picked_count++;
+    }
+    //returning the head of the new list holding the shortest cooking time things.
+    return newHead;
+}
+
+/*
+
+This helper function returns 1 if the item's referenced by any ItemNode in the menu 
+or in any TableOrder EXCEPT the one at excludeIndex.
+
+*/
+static int isItemReferencedElsewhere(Item *item, int excludeIndex) {
+    //checking menu
+    ItemNode *curr = menu.head;
+    while (curr != NULL) {
+        if (curr->item == item){
+            return 1;
+        }
+        curr = curr->next;
+    }
+    //checking all orders except excludeIndex
+    for (int i = 0; i < num_table_orders; i++) {
+        if (i == excludeIndex) continue;
+        ItemNode *node = orders[i].head;
+        while (node != NULL) {
+            if (node->item == item) {
+               return 1; 
+            }
+            node = node->next;
+        }
+    }
+    return 0;
 }
 
 /**
@@ -328,8 +429,47 @@ ItemNode *rushHourSearch(void) {
  * @return FAILURE on invalid input, else SUCCESS
  */
 int freeTableOrder(int table_num) {
-    UNUSED(table_num);
-    return INCOMPLETE;
+    if (table_num < 0) {
+        return FAILURE;
+    }
+    if (table_num >= num_table_orders) {
+        return FAILURE;
+    }
+
+    //Tracking items already freed in this pass to avoid double-frees if the same item appears twice.
+    Item *freed_items[MAX_ORDER_COUNT * 10];
+    int freed_count = 0;
+ 
+    //Going to walk through the orders array and checking for if the table order is used else where, and freeing if it is.
+    ItemNode *curr = orders[table_num].head;
+    while (curr != NULL) {
+        ItemNode *next = curr->next;
+        Item *it = curr->item;
+ 
+        int already_freed = 0;
+        for (int i = 0; i < freed_count; i++) {
+            if (freed_items[i] == it) {
+                already_freed = 1;
+                break;
+            }
+        }
+ 
+        if (!already_freed && !isItemReferencedElsewhere(it, table_num)) {
+            freed_items[freed_count] = it;
+            freed_count++;
+            free(it);
+        }
+        free(curr);
+        curr = next;
+    }
+ 
+    for (int i = table_num; i < num_table_orders - 1; i++) {
+        orders[i] = orders[i + 1];
+    }
+    //Decrementing the number of table orders as we freed one.
+    num_table_orders--;
+ 
+    return SUCCESS;
 }
 
 /**
@@ -340,5 +480,19 @@ int freeTableOrder(int table_num) {
  * @return FAILURE if any errors, else SUCCESS
  */
 int shutdownRestaurant(void) {
-    return INCOMPLETE;
+    while (num_table_orders > 0) {
+        freeTableOrder(0);
+    }
+
+    ItemNode *curr = menu.head;
+    while (curr != NULL) {
+        ItemNode *next = curr->next;
+        free(curr->item);
+        free(curr);
+        curr = next;
+    }
+    
+    menu.head = NULL;
+
+    return SUCCESS;
 }
