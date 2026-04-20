@@ -84,23 +84,20 @@ int removeFromMenu(Item *item) {
     if (item == NULL){
         return FAILURE;
     }
-    if (item->cook_time < 0 || item->cost < 0 || item->name[0] == '\0') {
-        return FAILURE;
-    }
     
     ItemNode *curr = menu.head;
     ItemNode *prev = NULL;
     int found = 0;
 
     while(curr != NULL) {
-        if (curr->item == item && strcmp(curr->item->name, item->name) == 0) {
+        if (curr->item == item) {
             if (prev == NULL) {
                 menu.head = curr->next;
             }
             else {
                 prev->next = curr->next;
             }
-            free(curr->item);
+            //Only free the node, not the Item; caller keeps ownership of the Item.
             free(curr);
             found = 1;
             break;
@@ -134,6 +131,25 @@ int addTableOrder(ItemNode *head, int table_num, int guests_at_table, int order_
     }
     if (num_table_orders >= MAX_ORDER_COUNT) {
         return FAILURE;
+    }
+
+    //Every item in the order must currently be on the menu.
+    //Check this before incrementing any counts so a failed order doesn't partially increment.
+    ItemNode *check = head;
+    while (check != NULL) {
+        ItemNode *m = menu.head;
+        int found = 0;
+        while (m != NULL) {
+            if (m->item == check->item) {
+                found = 1;
+                break;
+            }
+            m = m->next;
+        }
+        if (found == 0) {
+            return FAILURE;
+        }
+        check = check->next;
     }
 
     TableOrder *newOrder = &orders[num_table_orders];
@@ -215,7 +231,10 @@ int keepChefFromQuitting(void) {
         ItemNode *next = curr->next;
         //Removing if the cooktime is greater than the acceptable one.
         if (curr->item->cook_time > ACCEPTABLE_COOK_TIME) {
+            Item *to_free = curr->item;
             removeFromMenu(curr->item);
+            //removeFromMenu no longer frees the Item, so free it here.
+            free(to_free);
         }
         curr = next; 
     }
@@ -241,6 +260,10 @@ int keepChefFromQuitting(void) {
 int freeDessert(TableOrder *order) {
     //Error checking.
     if (order == NULL) {
+        return FAILURE;
+    }
+    //Fail if there are no table orders at all.
+    if (num_table_orders == 0) {
         return FAILURE;
     }
     //Initing pointers
@@ -279,6 +302,9 @@ int freeDessert(TableOrder *order) {
     }
     newNode->item = pie;
     newNode->next = NULL;
+    //Apple pie is free, so make sure cost is 0 and bump its order_count.
+    pie->cost = 0;
+    pie->order_count++;
     //Here i'm just appending the new node to the order head's list.
     if (order->head == NULL) {
         order->head = newNode;
@@ -428,7 +454,16 @@ int freeTableOrder(int table_num) {
     if (table_num < 0) {
         return FAILURE;
     }
-    if (table_num >= num_table_orders) {
+
+    //The argument is a table number, not an array index. Find the matching order.
+    int idx = -1;
+    for (int i = 0; i < num_table_orders; i++) {
+        if (orders[i].table_num == table_num) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx == -1) {
         return FAILURE;
     }
 
@@ -437,7 +472,7 @@ int freeTableOrder(int table_num) {
     int freed_count = 0;
  
     //Going to walk through the orders array and checking for if the table order is used else where, and freeing if it is.
-    ItemNode *curr = orders[table_num].head;
+    ItemNode *curr = orders[idx].head;
     while (curr != NULL) {
         ItemNode *next = curr->next;
         Item *it = curr->item;
@@ -450,7 +485,7 @@ int freeTableOrder(int table_num) {
             }
         }
  
-        if (!already_freed && !isItemReferencedElsewhere(it, table_num)) {
+        if (!already_freed && !isItemReferencedElsewhere(it, idx)) {
             freed_items[freed_count] = it;
             freed_count++;
             free(it);
@@ -459,7 +494,7 @@ int freeTableOrder(int table_num) {
         curr = next;
     }
  
-    for (int i = table_num; i < num_table_orders - 1; i++) {
+    for (int i = idx; i < num_table_orders - 1; i++) {
         orders[i] = orders[i + 1];
     }
     //Decrementing the number of table orders as we freed one.
@@ -476,10 +511,54 @@ int freeTableOrder(int table_num) {
  * @return FAILURE if any errors, else SUCCESS
  */
 int shutdownRestaurant(void) {
-    while (num_table_orders > 0) {
-        freeTableOrder(0);
-    }
+    //Free all table orders first. Walk each order's list and free the nodes.
+    //Items in orders may also be in the menu, so we do NOT free Items here;
+    //the menu cleanup below handles those. For Items that are ONLY in an order
+    //(not on the menu), we free them as we encounter them, tracking to avoid
+    //double-frees.
+    Item *freed_items[MAX_ORDER_COUNT * 10];
+    int freed_count = 0;
 
+    for (int i = 0; i < num_table_orders; i++) {
+        ItemNode *curr = orders[i].head;
+        while (curr != NULL) {
+            ItemNode *next = curr->next;
+            Item *it = curr->item;
+
+            //Is `it` in the menu? If so, the menu owns it; don't free here.
+            int in_menu = 0;
+            ItemNode *m = menu.head;
+            while (m != NULL) {
+                if (m->item == it) {
+                    in_menu = 1;
+                    break;
+                }
+                m = m->next;
+            }
+
+            if (!in_menu) {
+                //Also check if we already freed it from an earlier order.
+                int already_freed = 0;
+                for (int j = 0; j < freed_count; j++) {
+                    if (freed_items[j] == it) {
+                        already_freed = 1;
+                        break;
+                    }
+                }
+                if (!already_freed) {
+                    freed_items[freed_count] = it;
+                    freed_count++;
+                    free(it);
+                }
+            }
+            free(curr);
+            curr = next;
+        }
+        orders[i].head = NULL;
+    }
+    num_table_orders = 0;
+
+    //Free the menu's nodes and their Items.
     ItemNode *curr = menu.head;
     while (curr != NULL) {
         ItemNode *next = curr->next;
